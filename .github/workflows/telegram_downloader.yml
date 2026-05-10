@@ -54,7 +54,6 @@ jobs:
                        -H "Accept: application/vnd.github+json" \
                        "$API")
 
-          # اگر خطا بود یا پوشه وجود نداشت، ادامه بده
           if echo "$FILES" | grep -q "Not Found"; then
             echo "📂 پوشهٔ downloads وجود ندارد – چیزی برای حذف نیست."
             exit 0
@@ -66,16 +65,25 @@ jobs:
             exit 0
           fi
 
-          echo "🔍 $COUNT فایل پیدا شد – حذف موازی با ۱۰ نخ..."
+          echo "🔍 $COUNT فایل پیدا شد – حذف موازی با دسته‌های ۱۰ تایی..."
 
-          # استخراج نام و SHA و ساخت دستورات curl برای حذف
-          echo "$FILES" | jq -r '.[] | "\(.name)|\(.sha)"' | while IFS='|' read -r NAME SHA; do
-            echo "curl -s -X DELETE -H \"Authorization: Bearer ${GH_TOKEN}\" \
-              -H \"Accept: application/vnd.github+json\" \
-              \"https://api.github.com/repos/${REPO}/contents/downloads/${NAME}\" \
-              -d '{\"message\":\"پاک‌سازی پیش از دانلود\",\"sha\":\"${SHA}\",\"branch\":\"${BRANCH}\"}'"
-          done | xargs -I {} -P 10 bash -c "{} > /dev/null 2>&1 && echo '🗑️ حذف شد'"
-
+          batch=0
+          while IFS='|' read -r NAME SHA; do
+            (
+              curl -s -X DELETE \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO}/contents/downloads/${NAME}" \
+                -d "{\"message\":\"پاک‌سازی پیش از دانلود\",\"sha\":\"${SHA}\",\"branch\":\"${BRANCH}\"}" > /dev/null \
+                && echo "🗑️ ${NAME} حذف شد"
+            ) &
+            ((batch++))
+            if [ $batch -ge 10 ]; then
+              wait
+              batch=0
+            fi
+          done < <(echo "$FILES" | jq -r '.[] | "\(.name)|\(.sha)"')
+          wait  # برای باقی‌مانده‌ها (کمتر از ۱۰)
           echo "✅ همهٔ فایل‌های قبلی از سرور حذف شدند."
 
       # ──────────────────────────────────────
@@ -89,7 +97,7 @@ jobs:
           fetch-depth: 1
 
       # ──────────────────────────────────────
-      # بقیه مراحل
+      # بقیه مراحل (مانند قبل)
       # ──────────────────────────────────────
       - name: 🔧 نصب ابزارهای ضروری
         run: |
